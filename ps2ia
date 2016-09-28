@@ -1,0 +1,198 @@
+#!/usr/bin/ruby
+
+require 'csv'
+require 'getoptlong'
+require 'oci8'
+require 'log4r'
+require 'date'
+require 'pp'
+require 'yaml'
+include Log4r
+
+# Procedure to process the incremental grades
+def process_grades_incremental (dbh)
+  # Delete the old output file if it exists
+  File.delete("grades_incremental.csv") if File::exists?("grades_incremental.csv")
+  CSV.open("grades_incremental.csv", "a", {:force_quotes=>false}) do |csv|
+    csv << ["State Testing Identifier", "Student Number", "Student Grade Level", "School Year", "Term", "Subject", "Course", "Score", "Date", "IsFinalGrade", "LetterGrade"]
+  end
+  
+  # Query to return the last 3 months of grades
+  query = "select s.state_studentnumber c1, s.student_number c2, " +
+    "s.grade_level c3, to_char(to_number(substr(sec.termid, 0,2)) + 1990) c4, " +
+    "g.finalgradename c5, " +
+	" case ps_customfields.getcf('courses', c.id, 'va_sced_subject_area') " +
+		"when '01' then 'Reading' " +
+		"when '02' then 'Math' " +
+		"when '03' then 'Science' " +
+		"when '04' then 'Social Science' " +
+		"when '05' then 'Art' " +
+		"when '06' then 'Foreign Language' " +
+		"when '07' then 'Religion' " +
+		"when '08' then 'Health' " +
+		"when '09' then 'Military' " +
+		"when '10' then 'Technology' " +
+		"when '11' then 'Commnunication' " +
+		"when '12' then 'Business' " +
+		"when '13' then 'Manufacturing' " +
+		"when '14' then 'Health Care' " +
+		"when '15' then 'Public Service' " +
+		"when '16' then 'Hospitality' " +
+		"when '17' then 'Construction' " +
+		"when '18' then 'Agriculture' " +
+		"when '19' then 'Human Services' " +
+		"when '20' then 'Transportation' " +
+		"when '21' then 'Engineering' " +
+		"when '22' then 'Miscellaneous' " +
+		"when '51' then 'Reading' " +
+		"when '52' then 'Math' " +
+		"when '53' then 'Science' " +
+		"when '54' then 'Social Science' " +
+		"when '55' then 'Art' " +
+		"when '56' then 'Foreign Language' " +
+		"when '57' then 'Religion' " +
+		"when '58' then 'Health' " +
+		"when '60' then 'Technology' " +
+		"when '61' then 'Commnunication' " +
+		"when '62' then 'Business' " +
+		"when '63' then 'Manufacturing' " +
+		"when '64' then 'Health Care' " +
+		"when '65' then 'Public Service' " +
+		"when '66' then 'Hospitality' " +
+		"when '67' then 'Construction' " +
+		"when '68' then 'Agriculture' " +
+		"when '69' then 'Human Services' " +
+		"when '70' then 'Transportation' " +
+		"when '71' then 'Engineering' " +
+		"when '72' then 'Miscellaneous' " +
+		" else 'Unknown' " +
+	"end c6, " +
+	"c.Course_Name c7, g.percent c8, " +
+	"to_char(g.enddate, 'MM/DD/YYYY') c9, " +
+	"case g.finalgradename " +
+	"when 'F1' then 1 " +
+	"when 'Y1' then 1 " +
+	"else 0 " +
+	"end c10, " +
+	"substr(g.grade, 1, 1) c11 " +
+    "from students s " +
+	"join pgfinalgrades g on s.id = g.studentid " +
+	"join sections sec on g.sectionid = sec.id " +
+	"join courses c on c.course_number = sec.course_number " +
+    "where g.grade is not null and g.grade <> '--' " +
+	"and g.percent is not null and g.percent <> 0 " +
+	"and g.finalgradename in ('Q1', 'Q2', 'Q3', 'Q4', 'Y1', 'F1', 'S1', 'S2') " +
+	"and g.enddate > add_months(sysdate, -3) " +
+    "order by s.state_studentnumber, g.enddate"
+	
+  # Run the query	
+  sth = dbh.exec(query)
+  # Loop through the rows and write out the CSV file
+  while row = sth.fetch_hash
+    # Write out the output csv in the format that IA wants
+    CSV.open("grades_incremental.csv", "a", {:force_quotes=>false}) do |csv|
+      csv << [row["C1"],row["C2"].to_i,row["C3"],row["C4"],row["C5"],row["C6"],row["C7"],row["C8"],row["C9"],row["C10"].to_i,row["C11"]]
+     end
+  end
+end # process_grades_incremental
+
+# Procedure to process the incremental attendance
+def process_attendance_incremental (dbh)
+  # Delete the old output file if it exists
+  File.delete("attendance_incremental.csv") if File::exists?("attendance_incremental.csv")
+  CSV.open("attendance_incremental.csv", "a", {:force_quotes=>false}) do |csv|
+    csv << ["State Testing Identifier", "Attendance Code", "Date", "Description", "Type"]
+  end
+
+  query = "select distinct " +
+	"s.state_studentnumber c1, " +
+	"ac.att_code c2, " +
+	"to_char(a.att_date, 'MM/DD/YYYY') c3, " +
+	"dbms_lob.substr(ac.description, 50) c4, " +
+	"case  " +
+		"when ac.presence_status_cd = 'Absent' then 2 " +
+		"when ac.description like '%Tardy%' then 1 " +
+	"end c5 " +
+    "from  " +
+	"students s " +
+	"join attendance a " +
+		"on s.id = a.studentid " +
+	"join attendance_code ac " +
+		"on a.attendance_codeid = ac.id " +
+    "where " +
+	"ac.att_code is not null " +
+	"and a.att_date > add_months(sysdate, -1) " +
+	"and (ac.presence_status_cd = 'Absent' or ac.description like '%Tardy%') " +
+    "order by 3, s.state_studentnumber"
+	
+  # Run the query	
+  sth = dbh.exec(query)
+  # Loop through the rows and write out the CSV file
+  while row = sth.fetch_hash
+    # Write out the output csv in the format that IA wants
+    CSV.open("attendance_incremental.csv", "a", {:force_quotes=>false}) do |csv|
+      csv << [row["C1"],row["C2"],row["C3"],row["C4"],row["C5"].to_i]
+     end
+  end 
+end # process_attendance_incremental
+
+def process_discipline_incremental (dbh)
+  # Delete the old output file if it exists
+  File.delete("discipline_incremental.csv") if File::exists?("discipline_incremental.csv")
+  CSV.open("discipline_incremental.csv", "a", {:force_quotes=>false}) do |csv|
+    csv << ["State Testing Identifier", "Discipline Code", "Secondary Code", "Date", "Description", "Type"]
+  end
+
+  query = "SELECT distinct " +
+    "s.state_studentnumber c1, " +
+    "ps_customfields.getcf('log', l.id, 'va_primary_code') c2, " +
+    "ps_customfields.getcf('log', l.id, 'va_offense_code2') c3, " +
+    "ps_customfields.getcf('log', l.id, 'va_incident_date') c4, " +
+    "replace((replace((replace ((substr((to_char(l.entry)),0,200)),',','-')),chr(10),' ')),chr(13),' ') c5,  " +
+    "ps_customfields.getcf('log', l.id, 'va_sanction') c6 " +
+    "FROM log l	JOIN students s	ON l.studentid = s.id " +
+    "WHERE  " +
+    "ps_customfields.getcf('log', l.id, 'va_primary_code') is not null " +
+    "and ps_customfields.getcf('log', l.id, 'va_incident_date') is not null " +
+    "and l.entry_date > add_months(sysdate, -3) " +
+    "order by s.state_studentnumber, ps_customfields.getcf('log', l.id, 'va_incident_date') "
+  # Run the query	
+  sth = dbh.exec(query)
+  # Loop through the rows and write out the CSV file
+  while row = sth.fetch_hash
+    # Write out the output csv in the format that IA wants
+    CSV.open("discipline_incremental.csv", "a", {:force_quotes=>false}) do |csv|
+      csv << [row["C1"],row["C2"],row["C3"],row["C4"],row["C5"],row["C6"]]
+     end
+  end 
+  
+end
+
+def read_config(db_login, db_password, db_instance)
+  begin
+    config = YAML.load_file("config/ps2ia.yaml")
+	@db_login = config["config"]["db_login"]
+	@db_password = config["config"]["db_password"]
+	@db_instance = config["config"]["db_instance"]
+  end
+end
+
+begin
+  
+  # Read in database config and open database handle
+  read_config(@db_login, @db_password, @db_instance)
+  dbh = OCI8.new(@db_login, @db_password, @db_instance)
+
+  # Execute grades module
+  process_grades_incremental (dbh)
+
+  # Execute attendance module
+  process_attendance_incremental (dbh)
+  
+  # Execute discipline module
+  process_discipline_incremental (dbh)
+  
+  # disconnect from server
+  dbh.logoff if dbh
+
+end
