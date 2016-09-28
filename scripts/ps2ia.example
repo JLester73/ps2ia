@@ -1,0 +1,12 @@
+#!/bin/sh
+export RUBYOPT=rubygems
+
+# Create export files for Interactive Achievement 
+
+cd /home/data/ps2ia
+ruby ps2ia
+
+# Upload files to IA for processing
+sshpass -p mypassword scp grades_incremental.csv mylogin@192.168.0.1:\studentgrades
+sshpass -p mypassword scp discipline_incremental.csv mylogin@192.168.0.1:\studentdiscipline
+sshpass -p mypassword scp attendance_incremental.csv mylogin@192.168.0.1:\studentattendance
